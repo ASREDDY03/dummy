@@ -1,3 +1,8 @@
+# --- Patch for Streamlit Cloud (Python 3.13 missing pyaudioop) ---
+import sys, types
+if sys.version_info >= (3, 13):
+    sys.modules['pyaudioop'] = types.ModuleType('pyaudioop')
+
 import streamlit as st
 import pdfplumber
 from gtts import gTTS
@@ -67,7 +72,6 @@ if uploaded_file:
     if qa_pairs:
         st.success(f"✅ Extracted {len(qa_pairs)} Q&A pairs successfully!")
 
-        # User controls
         pause_duration = st.slider("🕒 Thinking Time (seconds)", 5, 20, 10)
         speech_speed = st.slider("🎚️ Reading Speed (1.0 = normal, >1.0 faster)", 0.8, 1.5, 1.0, 0.1)
         num_questions = st.slider("📋 Number of Questions", 3, min(15, len(qa_pairs)), 5)
@@ -81,7 +85,6 @@ if uploaded_file:
                 tts.save(fp.name)
                 audio = AudioSegment.from_mp3(fp.name)
                 adjusted = audio.speedup(playback_speed=speed)
-                # Skip playback on Streamlit Cloud (no speakers)
                 if not IS_CLOUD:
                     try:
                         play(adjusted)
