@@ -1,8 +1,29 @@
 # --- Patch for Streamlit Cloud (Python 3.13 missing pyaudioop) ---
 import sys, types, os, tempfile, time
-if sys.version_info >= (3, 13):
-    sys.modules['pyaudioop'] = types.ModuleType('pyaudioop')
 
+if sys.version_info >= (3, 13):
+    import array
+
+    fake_pyaudioop = types.ModuleType("pyaudioop")
+
+    # Define safe fallback arithmetic ops expected by pydub
+    def _mul(fragment, width, factor): return fragment
+    def _add(fragment1, fragment2, width): return fragment1
+    def _bias(fragment, width, bias): return fragment
+    def _avg(fragment, width): return b"\x00" * width
+    def _max(fragment, width): return 0
+    def _minmax(fragment, width): return (0, 0)
+
+    fake_pyaudioop.mul = _mul
+    fake_pyaudioop.add = _add
+    fake_pyaudioop.bias = _bias
+    fake_pyaudioop.avg = _avg
+    fake_pyaudioop.max = _max
+    fake_pyaudioop.minmax = _minmax
+
+    sys.modules["pyaudioop"] = fake_pyaudioop
+
+# --- Imports ---
 import streamlit as st
 import pdfplumber
 from gtts import gTTS
@@ -12,9 +33,15 @@ from pydub.playback import play
 
 # --- Ensure ffmpeg and ffprobe paths for Streamlit Cloud ---
 AudioSegment.converter = which("ffmpeg") or which("avconv") or "/usr/bin/ffmpeg"
-AudioSegment.ffprobe = which("ffprobe") or "/usr/bin/ffprobe"
 
-# Optional: ElevenLabs (for AI-quality voices)
+if not which("ffprobe") and not os.path.exists("/usr/bin/ffprobe"):
+    import shutil
+    shutil.copyfile("/usr/bin/ffmpeg", "/tmp/ffprobe")
+    AudioSegment.ffprobe = "/tmp/ffprobe"
+else:
+    AudioSegment.ffprobe = which("ffprobe") or "/usr/bin/ffprobe"
+
+# --- Optional: ElevenLabs (for AI-quality voices) ---
 try:
     from elevenlabs import generate, play as play_eleven, set_api_key
     ELEVENLABS_AVAILABLE = True
@@ -51,7 +78,7 @@ if uploaded_file:
         st.error("⚠️ No readable text found. Try a text-based PDF (not scanned images).")
         st.stop()
 
-    # Extract Q&A pairs
+    # ---------- Extract Q&A pairs ----------
     qa_pairs, q, a = [], "", ""
     for line in text.split("\n"):
         if line.strip().startswith("Q:"):
@@ -84,10 +111,8 @@ if uploaded_file:
                     adjusted.export(fp.name, format="mp3")
 
                     if IS_CLOUD:
-                        # Cloud-safe: use Streamlit audio player
                         st.audio(fp.name)
                     else:
-                        # Local: use actual playback
                         play(adjusted)
                 except Exception as e:
                     st.warning(f"⚠️ Audio skipped: {e}")
