@@ -10,8 +10,9 @@ from pydub import AudioSegment
 from pydub.utils import which
 from pydub.playback import play
 
-# --- Ensure ffmpeg path for Streamlit Cloud ---
+# --- Ensure ffmpeg and ffprobe paths for Streamlit Cloud ---
 AudioSegment.converter = which("ffmpeg") or which("avconv") or "/usr/bin/ffmpeg"
+AudioSegment.ffprobe = which("ffprobe") or "/usr/bin/ffprobe"
 
 # Optional: ElevenLabs (for AI-quality voices)
 try:
