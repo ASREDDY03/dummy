@@ -1,27 +1,26 @@
-# --- Patch for Streamlit Cloud (Python 3.13 missing pyaudioop) ---
+# --- Patch for Python 3.13 removal of audioop (affects pydub) ---
 import sys, types, os, tempfile, time
 
 if sys.version_info >= (3, 13):
     import array
 
-    fake_pyaudioop = types.ModuleType("pyaudioop")
+    fake_audioop = types.ModuleType("audioop")
 
-    # Define safe fallback arithmetic ops expected by pydub
+    # Minimal safe stubs used by pydub
     def _mul(fragment, width, factor): return fragment
     def _add(fragment1, fragment2, width): return fragment1
     def _bias(fragment, width, bias): return fragment
     def _avg(fragment, width): return b"\x00" * width
     def _max(fragment, width): return 0
     def _minmax(fragment, width): return (0, 0)
+    def _getsample(fragment, width, index): return 0
+    def _reverse(fragment, width): return fragment
+    def _tostereo(fragment, width, lfactor, rfactor): return fragment
 
-    fake_pyaudioop.mul = _mul
-    fake_pyaudioop.add = _add
-    fake_pyaudioop.bias = _bias
-    fake_pyaudioop.avg = _avg
-    fake_pyaudioop.max = _max
-    fake_pyaudioop.minmax = _minmax
+    for fn in ["mul","add","bias","avg","max","minmax","getsample","reverse","tostereo"]:
+        setattr(fake_audioop, fn, locals().get(f"_{fn}"))
 
-    sys.modules["pyaudioop"] = fake_pyaudioop
+    sys.modules["audioop"] = fake_audioop
 
 # --- Imports ---
 import streamlit as st
@@ -31,9 +30,8 @@ from pydub import AudioSegment
 from pydub.utils import which
 from pydub.playback import play
 
-# --- Ensure ffmpeg and ffprobe paths for Streamlit Cloud ---
-AudioSegment.converter = which("ffmpeg") or which("avconv") or "/usr/bin/ffmpeg"
-
+# --- Ensure ffmpeg/ffprobe on Streamlit Cloud ---
+AudioSegment.converter = which("ffmpeg") or "/usr/bin/ffmpeg"
 if not which("ffprobe") and not os.path.exists("/usr/bin/ffprobe"):
     import shutil
     shutil.copyfile("/usr/bin/ffmpeg", "/tmp/ffprobe")
@@ -41,7 +39,7 @@ if not which("ffprobe") and not os.path.exists("/usr/bin/ffprobe"):
 else:
     AudioSegment.ffprobe = which("ffprobe") or "/usr/bin/ffprobe"
 
-# --- Optional: ElevenLabs (for AI-quality voices) ---
+# --- Optional: ElevenLabs voices ---
 try:
     from elevenlabs import generate, play as play_eleven, set_api_key
     ELEVENLABS_AVAILABLE = True
@@ -67,7 +65,6 @@ with adjustable speed and thinking time.
 uploaded_file = st.file_uploader("📄 Upload your Interview PDF", type=["pdf"])
 use_ai_voice = st.toggle("🎧 Use AI Voice (ElevenLabs)", value=False)
 
-# Detect if running on Streamlit Cloud
 IS_CLOUD = "STREAMLIT_SERVER_RUNNING" in os.environ
 
 if uploaded_file:
