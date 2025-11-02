@@ -1,2 +1,8 @@
 ffmpeg
 libavcodec-extra
+libavformat58
+libavutil56
+libavdevice58
+libavfilter7
+libswresample3
+libswscale5
