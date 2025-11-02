@@ -16,6 +16,8 @@ except ImportError:
 
 # ---------- Streamlit UI ----------
 st.set_page_config(page_title="AI Interview Simulator", layout="wide", initial_sidebar_state="collapsed")
+
+# UI styling
 st.markdown("""
 <style>
 h1, h2, h3, h4, h5 {font-size:18px !important;}
@@ -25,16 +27,26 @@ h1, h2, h3, h4, h5 {font-size:18px !important;}
 
 st.title("🎤 AI Interview Practice Simulator")
 st.write("""
-Upload your interview PDF and practice like a real interview.  
-The AI will **read each question aloud**, wait for your answer, and then read the **model answer** — all with adjustable speed and timing.
+Upload your interview Q&A PDF and practice like a real interview.  
+The AI will **read each question aloud**, wait for your response, and then read the **model answer**,  
+with adjustable speed and thinking time.
 """)
 
 uploaded_file = st.file_uploader("📄 Upload your Interview PDF", type=["pdf"])
 use_ai_voice = st.toggle("🎧 Use AI Voice (ElevenLabs)", value=False)
 
+# Detect if running on Streamlit Cloud
+IS_CLOUD = "STREAMLIT_SERVER_RUNNING" in os.environ
+
 if uploaded_file:
+    # Extract text from PDF
     with pdfplumber.open(uploaded_file) as pdf:
-        text = "\n".join(page.extract_text() for page in pdf.pages if page.extract_text())
+        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+    # Validate PDF content
+    if not text.strip():
+        st.error("⚠️ No readable text found. Try a text-based PDF (not scanned images).")
+        st.stop()
 
     # Extract Q&A pairs
     qa_pairs = []
@@ -55,60 +67,82 @@ if uploaded_file:
     if qa_pairs:
         st.success(f"✅ Extracted {len(qa_pairs)} Q&A pairs successfully!")
 
+        # User controls
         pause_duration = st.slider("🕒 Thinking Time (seconds)", 5, 20, 10)
         speech_speed = st.slider("🎚️ Reading Speed (1.0 = normal, >1.0 faster)", 0.8, 1.5, 1.0, 0.1)
         num_questions = st.slider("📋 Number of Questions", 3, min(15, len(qa_pairs)), 5)
 
-        # Voice function (gTTS + Pydub)
+        # ---------- Voice Functions ----------
+
         def speak(text, speed=1.0):
+            """Local speech playback using gTTS + Pydub (disabled on Cloud)."""
             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
                 tts = gTTS(text)
                 tts.save(fp.name)
                 audio = AudioSegment.from_mp3(fp.name)
                 adjusted = audio.speedup(playback_speed=speed)
-                play(adjusted)
+                # Skip playback on Streamlit Cloud (no speakers)
+                if not IS_CLOUD:
+                    try:
+                        play(adjusted)
+                    except Exception as e:
+                        st.warning(f"⚠️ Playback skipped: {e}")
                 os.remove(fp.name)
 
-        # ElevenLabs function (if enabled)
         def speak_ai(text, speed=1.0):
-            from elevenlabs import generate, play, set_api_key
-            set_api_key(st.secrets.get("ELEVENLABS_API_KEY", ""))  # Add key to secrets.toml if deployed
-            audio = generate(
-                text=text,
-                voice="Rachel",
-                model="eleven_multilingual_v2",
-                stream=True,
-                voice_settings={"stability": 0.5, "speaking_rate": speed}
-            )
-            play(audio)
+            """AI voice via ElevenLabs (optional)."""
+            if not ELEVENLABS_AVAILABLE:
+                st.warning("⚠️ ElevenLabs not installed or configured.")
+                return
+            try:
+                set_api_key(st.secrets.get("ELEVENLABS_API_KEY", ""))
+                audio = generate(
+                    text=text,
+                    voice="Rachel",
+                    model="eleven_multilingual_v2",
+                    stream=True,
+                    voice_settings={"stability": 0.5, "speaking_rate": speed}
+                )
+                if not IS_CLOUD:
+                    play_eleven(audio)
+                else:
+                    st.info("🔇 AI voice generated but not played in cloud.")
+            except Exception as e:
+                st.warning(f"ElevenLabs error: {e}")
 
+        # ---------- Simulation ----------
         if st.button("▶️ Start Interview Simulation"):
             progress = st.progress(0)
             for i, (q, a) in enumerate(qa_pairs[:num_questions]):
                 st.markdown(f"### ❓ Question {i+1}:")
                 st.write(q)
+
+                # Read question
                 if use_ai_voice and ELEVENLABS_AVAILABLE:
                     speak_ai(f"Question {i+1}. {q}", speed=speech_speed)
                 else:
                     speak(f"Question {i+1}. {q}", speed=speech_speed)
 
+                # Wait for user response
                 with st.empty():
                     for sec in range(pause_duration, 0, -1):
                         st.info(f"⏳ Waiting {sec} seconds for your response...")
                         time.sleep(1)
                     st.empty()
 
+                # Read answer
                 st.markdown(f"**✅ Answer:** {a}")
                 if use_ai_voice and ELEVENLABS_AVAILABLE:
                     speak_ai(f"Answer. {a}", speed=speech_speed)
                 else:
                     speak(f"Answer. {a}", speed=speech_speed)
 
-                progress.progress(int(((i+1)/num_questions)*100))
+                # Progress update
+                progress.progress(int(((i+1)/num_questions) * 100))
                 st.markdown("---")
 
-            st.success("🎉 Interview Simulation Completed! Great work!")
+            st.success("🎉 Interview Simulation Completed! Great job!")
     else:
-        st.error("❌ No Q&A pairs found — make sure your PDF uses 'Q:' and 'A:' labels.")
+        st.error("❌ No Q&A pairs found. Make sure your PDF uses 'Q:' and 'A:' labels.")
 else:
     st.info("👆 Upload your PDF to begin the simulation.")
